@@ -1,0 +1,122 @@
+# Week 1 — Data Sourcing, Cleaning & Preprocessing
+# CKD Prediction Pipeline | Chronic Disease Analytics Internship
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# ── 1. Load Data ───────────────────────────────────────────────────────────────
+
+df = pd.read_csv('ckd_raw_data.csv')
+
+print("Dataset shape:", df.shape)
+print("\nFirst 5 rows:")
+print(df.head())
+
+# ── 2. Initial Audit ───────────────────────────────────────────────────────────
+
+print("\n── Data Types ──")
+print(df.dtypes)
+
+print("\n── Missing Value Count ──")
+missing = df.isnull().sum()
+print(missing[missing > 0])
+
+print("\n── Class Distribution ──")
+print(df['classification'].value_counts())
+print(df['classification'].value_counts(normalize=True).round(3))
+
+# ── 3. Fix Data Types ─────────────────────────────────────────────────────────
+
+numeric_cols = [
+    'age', 'blood_pressure', 'specific_gravity', 'albumin', 'sugar',
+    'blood_glucose_random', 'blood_urea', 'serum_creatinine', 'sodium',
+    'potassium', 'hemoglobin', 'packed_cell_volume',
+    'white_blood_cell_count', 'red_blood_cell_count'
+]
+
+categorical_cols = [
+    'red_blood_cells', 'pus_cell', 'pus_cell_clumps', 'bacteria',
+    'hypertension', 'diabetes_mellitus', 'coronary_artery_disease',
+    'appetite', 'pedal_edema', 'anemia'
+]
+
+for col in numeric_cols:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+# ── 4. Handle Missing Values ──────────────────────────────────────────────────
+for col in numeric_cols:
+    median_val = df[col].median()
+    df[col] = df[col].fillna(median_val)
+    print(f"  Filled {col} missing values with median: {median_val:.2f}")
+
+for col in categorical_cols:
+    mode_val = df[col].mode()[0]
+    df[col] = df[col].fillna(mode_val)
+
+print("\nMissing values after imputation:", df.isnull().sum().sum())
+
+# ── 5. Encode Target Variable ─────────────────────────────────────────────────
+
+df['target'] = (df['classification'] == 'ckd').astype(int)
+print("\nTarget encoding — 1: CKD, 0: Not CKD")
+print(df['target'].value_counts())
+
+# ── 6. Summary Statistics ─────────────────────────────────────────────────────
+
+print("\n── Numeric Summary ──")
+print(df[numeric_cols].describe().round(2))
+
+# ── 7. Visualise Missing Data Before Imputation ───────────────────────────────
+
+# reload raw to show original missingness pattern
+raw = pd.read_csv('ckd_raw_data.csv')
+for col in numeric_cols:
+    raw[col] = pd.to_numeric(raw[col], errors='coerce')
+
+fig, ax = plt.subplots(figsize=(10, 5))
+miss_pct = raw[numeric_cols].isnull().mean() * 100
+miss_pct = miss_pct[miss_pct > 0].sort_values(ascending=False)
+bars = ax.bar(miss_pct.index, miss_pct.values, color='#5DCAA5', edgecolor='white', linewidth=0.5)
+ax.set_title('Missing data percentage by feature (before imputation)', fontsize=13, pad=12)
+ax.set_ylabel('Missing (%)')
+ax.set_xlabel('')
+plt.xticks(rotation=35, ha='right', fontsize=9)
+ax.spines[['top', 'right']].set_visible(False)
+ax.grid(axis='y', alpha=0.3)
+for bar, val in zip(bars, miss_pct.values):
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.2,
+            f'{val:.1f}%', ha='center', va='bottom', fontsize=8)
+plt.tight_layout()
+plt.savefig('week1_missing_data.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week1_missing_data.png")
+
+# ── 8. Class Imbalance Plot ────────────────────────────────────────────────────
+
+fig, ax = plt.subplots(figsize=(5, 4))
+counts = df['target'].value_counts()
+colors = ['#5DCAA5', '#D85A30']
+bars = ax.bar(['Not CKD (0)', 'CKD (1)'], counts.values, color=colors, edgecolor='white', linewidth=0.5)
+ax.set_title('Class distribution — CKD vs Not CKD', fontsize=12)
+ax.set_ylabel('Count')
+ax.spines[['top', 'right']].set_visible(False)
+ax.grid(axis='y', alpha=0.3)
+for bar, val in zip(bars, counts.values):
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+            str(val), ha='center', fontsize=10, fontweight='500')
+plt.tight_layout()
+plt.savefig('week1_class_distribution.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week1_class_distribution.png")
+
+# ── 9. Save Cleaned Data ──────────────────────────────────────────────────────
+
+df.to_csv('ckd_cleaned.csv', index=False)
+print("\nCleaned dataset saved as ckd_cleaned.csv")
+print("Shape:", df.shape)
+print("\nWeek 1 complete. Commit with prefix: data-clean:")
