@@ -1,0 +1,165 @@
+# Week 2 — Exploratory Data Analysis & Biomarker Correlations
+# CKD Prediction Pipeline | Chronic Disease Analytics Internship
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
+
+df = pd.read_csv('ckd_cleaned.csv')
+
+numeric_cols = [
+    'age', 'blood_pressure', 'specific_gravity', 'albumin', 'sugar',
+    'blood_glucose_random', 'blood_urea', 'serum_creatinine', 'sodium',
+    'potassium', 'hemoglobin', 'packed_cell_volume',
+    'white_blood_cell_count', 'red_blood_cell_count'
+]
+
+categorical_cols = [
+    'red_blood_cells', 'pus_cell', 'pus_cell_clumps', 'bacteria',
+    'hypertension', 'diabetes_mellitus', 'coronary_artery_disease',
+    'appetite', 'pedal_edema', 'anemia'
+]
+
+palette = {0: '#5DCAA5', 1: '#D85A30'}
+label_map = {0: 'Not CKD', 1: 'CKD'}
+df['label'] = df['target'].map(label_map)
+
+# ── 1. Correlation Heatmap ────────────────────────────────────────────────────
+
+fig, ax = plt.subplots(figsize=(12, 9))
+corr = df[numeric_cols + ['target']].corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+sns.heatmap(
+    corr, mask=mask, annot=True, fmt='.2f', cmap='RdYlGn',
+    center=0, linewidths=0.4, ax=ax,
+    annot_kws={'size': 8}, square=True
+)
+ax.set_title('Correlation heatmap — numeric biomarkers', fontsize=13, pad=12)
+plt.xticks(rotation=40, ha='right', fontsize=8)
+plt.yticks(fontsize=8)
+plt.tight_layout()
+plt.savefig('week2_correlation_heatmap.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week2_correlation_heatmap.png")
+
+# report top correlations with target
+target_corr = corr['target'].drop('target').abs().sort_values(ascending=False)
+print("\nTop biomarker correlations with CKD:")
+print(target_corr.round(3).to_string())
+
+# ── 2. Violin Plots — Key Biomarkers ─────────────────────────────────────────
+
+key_biomarkers = [
+    'serum_creatinine', 'hemoglobin', 'blood_urea',
+    'blood_glucose_random', 'blood_pressure', 'sodium'
+]
+
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+axes = axes.flatten()
+
+for i, col in enumerate(key_biomarkers):
+    ax = axes[i]
+    parts = ax.violinplot(
+        [df[df['target'] == 0][col].values,
+         df[df['target'] == 1][col].values],
+        positions=[0, 1], showmedians=True, showextrema=True
+    )
+    for j, pc in enumerate(parts['bodies']):
+        pc.set_facecolor(['#5DCAA5', '#D85A30'][j])
+        pc.set_alpha(0.7)
+    parts['cmedians'].set_color('black')
+    parts['cmedians'].set_linewidth(1.5)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(['Not CKD', 'CKD'])
+    ax.set_title(col.replace('_', ' ').title(), fontsize=10)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(axis='y', alpha=0.25)
+
+plt.suptitle('Biomarker distributions — CKD vs Not CKD', fontsize=13, y=1.01)
+plt.tight_layout()
+plt.savefig('week2_violin_plots.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week2_violin_plots.png")
+
+# ── 3. Age vs Blood Pressure Scatter ─────────────────────────────────────────
+
+fig, ax = plt.subplots(figsize=(8, 5))
+for target_val, group in df.groupby('target'):
+    ax.scatter(
+        group['age'], group['blood_pressure'],
+        c=palette[target_val], label=label_map[target_val],
+        alpha=0.55, s=30, edgecolors='none'
+    )
+ax.set_xlabel('Age')
+ax.set_ylabel('Blood pressure (mm Hg)')
+ax.set_title('Age vs blood pressure by CKD status', fontsize=12)
+ax.legend(title='Diagnosis')
+ax.spines[['top', 'right']].set_visible(False)
+ax.grid(alpha=0.2)
+plt.tight_layout()
+plt.savefig('week2_age_vs_bp.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week2_age_vs_bp.png")
+
+# ── 4. Categorical Feature Analysis ─────────────────────────────────────────
+
+fig, axes = plt.subplots(2, 5, figsize=(16, 7))
+axes = axes.flatten()
+
+for i, col in enumerate(categorical_cols):
+    ax = axes[i]
+    ct = df.groupby([col, 'label']).size().unstack(fill_value=0)
+    ct_pct = ct.div(ct.sum(axis=1), axis=0) * 100
+    ct_pct.plot(kind='bar', ax=ax, color=['#D85A30', '#5DCAA5'],
+                edgecolor='white', linewidth=0.3, legend=(i == 0), width=0.65)
+    ax.set_title(col.replace('_', ' '), fontsize=9)
+    ax.set_xlabel('')
+    ax.set_ylabel('% of group' if i % 5 == 0 else '')
+    ax.tick_params(axis='x', labelrotation=25, labelsize=8)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(axis='y', alpha=0.25)
+    if i == 0:
+        ax.legend(fontsize=8, title='', loc='upper right')
+
+plt.suptitle('CKD prevalence across categorical features', fontsize=12, y=1.02)
+plt.tight_layout()
+plt.savefig('week2_categorical_analysis.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week2_categorical_analysis.png")
+
+# ── 5. Pairplot — Top 4 Biomarkers ───────────────────────────────────────────
+
+top4 = ['serum_creatinine', 'hemoglobin', 'blood_urea', 'blood_pressure']
+pp = sns.pairplot(
+    df[top4 + ['label']],
+    hue='label',
+    palette={'Not CKD': '#5DCAA5', 'CKD': '#D85A30'},
+    diag_kind='kde',
+    plot_kws={'alpha': 0.4, 's': 20}
+)
+pp.fig.suptitle('Pairplot — top biomarkers', fontsize=12, y=1.02)
+plt.savefig('week2_pairplot.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week2_pairplot.png")
+
+# ── 6. Multicollinearity Flag ─────────────────────────────────────────────────
+
+print("\n── Highly correlated feature pairs (|r| > 0.7) ──")
+corr_matrix = df[numeric_cols].corr().abs()
+upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+high_corr_pairs = [(col, row, upper.loc[row, col])
+                   for col in upper.columns
+                   for row in upper.index
+                   if upper.loc[row, col] > 0.7]
+
+if high_corr_pairs:
+    for a, b, v in sorted(high_corr_pairs, key=lambda x: -x[2]):
+        print(f"  {a} ↔ {b}: {v:.3f}")
+else:
+    print("  No pairs exceed 0.7 — multicollinearity is not a concern.")
+
+print("\nWeek 2 complete. Commit with prefix: eda:")
