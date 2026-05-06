@@ -1,0 +1,46 @@
+# Raw and generated data — never commit patient data
+*.csv
+!ckd_raw_data.csv
+
+# Trained model artifacts
+*.pkl
+*.joblib
+*.h5
+
+# Output images
+*.png
+*.jpg
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit these
+secrets.py
+config_local.py
