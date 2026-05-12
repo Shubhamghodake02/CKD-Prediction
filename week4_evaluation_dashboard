@@ -1,0 +1,260 @@
+# Week 4 — Clinical Evaluation, Dashboarding & Final Reporting
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics import (
+    confusion_matrix, classification_report,
+    roc_auc_score, roc_curve, recall_score,
+    precision_score, f1_score, accuracy_score
+)
+from sklearn.model_selection import train_test_split
+import joblib
+import warnings
+warnings.filterwarnings('ignore')
+
+# ── 1. Load Everything ────────────────────────────────────────────────────────
+
+df = pd.read_csv('ckd_cleaned.csv')
+feature_importance_df = pd.read_csv('feature_importance.csv')
+
+categorical_cols = [
+    'red_blood_cells', 'pus_cell', 'pus_cell_clumps', 'bacteria',
+    'hypertension', 'diabetes_mellitus', 'coronary_artery_disease',
+    'appetite', 'pedal_edema', 'anemia'
+]
+le = LabelEncoder()
+for col in categorical_cols:
+    df[col] = le.fit_transform(df[col].astype(str))
+
+feature_cols = [c for c in df.columns if c not in ['classification', 'target', 'label']]
+X = df[feature_cols]
+y = df['target']
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+lr_model = joblib.load('model_logistic_regression.pkl')
+rf_model = joblib.load('model_random_forest.pkl')
+scaler = joblib.load('scaler.pkl')
+
+X_test_scaled = scaler.transform(X_test)
+
+lr_pred = lr_model.predict(X_test_scaled)
+rf_pred = rf_model.predict(X_test)
+lr_proba = lr_model.predict_proba(X_test_scaled)[:, 1]
+rf_proba = rf_model.predict_proba(X_test)[:, 1]
+
+# ── 2. Confusion Matrices ─────────────────────────────────────────────────────
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+for ax, pred, proba, name in [
+    (axes[0], lr_pred, lr_proba, 'Logistic Regression'),
+    (axes[1], rf_pred, rf_proba, 'Random Forest')
+]:
+    cm = confusion_matrix(y_test, pred)
+    labels = np.array([
+        [f"TN\n{cm[0,0]}", f"FP\n{cm[0,1]}"],
+        [f"FN\n{cm[1,0]}", f"TP\n{cm[1,1]}"]
+    ])
+    sns.heatmap(
+        cm, annot=labels, fmt='', ax=ax,
+        cmap='YlOrRd', linewidths=1, linecolor='white',
+        xticklabels=['Pred: Not CKD', 'Pred: CKD'],
+        yticklabels=['Actual: Not CKD', 'Actual: CKD'],
+        cbar=False
+    )
+    auc = roc_auc_score(y_test, proba)
+    rec = recall_score(y_test, pred)
+    ax.set_title(f'{name}\nRecall: {rec:.3f}  |  ROC-AUC: {auc:.3f}', fontsize=11, pad=10)
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+
+# annotate why FN is critical
+axes[0].text(
+    0.5, -0.12,
+    '  False Negatives (FN) = sick patients sent home — minimising these is the clinical priority',
+    ha='center', transform=axes[0].transAxes, fontsize=8.5,
+    color='#993C1D', style='italic'
+)
+plt.suptitle('Confusion matrices — test set', fontsize=13, y=1.02)
+plt.tight_layout()
+plt.savefig('week4_confusion_matrices.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week4_confusion_matrices.png")
+
+# ── 3. Full Metrics Table ─────────────────────────────────────────────────────
+
+metrics_rows = []
+for name, pred, proba in [
+    ('Logistic Regression', lr_pred, lr_proba),
+    ('Random Forest', rf_pred, rf_proba)
+]:
+    metrics_rows.append({
+        'Model': name,
+        'Accuracy': round(accuracy_score(y_test, pred), 4),
+        'Precision': round(precision_score(y_test, pred), 4),
+        'Recall': round(recall_score(y_test, pred), 4),
+        'F1 Score': round(f1_score(y_test, pred), 4),
+        'ROC-AUC': round(roc_auc_score(y_test, proba), 4)
+    })
+
+metrics_df = pd.DataFrame(metrics_rows)
+print("\n── Final Model Comparison ──")
+print(metrics_df.to_string(index=False))
+metrics_df.to_csv('model_metrics.csv', index=False)
+print("Saved: model_metrics.csv")
+
+# ── 4. Why Recall is the Priority Metric ─────────────────────────────────────
+# In CKD screening, a False Negative means a patient with kidney disease is
+# incorrectly classified as healthy and leaves without treatment.
+# Early-stage CKD is largely silent; by the time symptoms appear, significant
+# irreversible damage has already occurred. A False Positive, while disruptive
+# (an unnecessary follow-up test), carries far lower clinical cost than a
+# missed diagnosis. We therefore optimise for Recall and accept a lower
+# Precision as the clinical tradeoff.
+
+print("\n── Clinical rationale: Recall as the priority metric ──")
+print("""
+  In medical screening, failing to detect a true positive (False Negative) is
+  worse than a false alarm (False Positive).
+  - False Negative: patient with CKD sent home → disease progresses undetected.
+  - False Positive: healthy patient recalled for further tests → inconvenient but safe.
+  We optimise for Recall (sensitivity) and accept lower Precision as the tradeoff.
+""")
+
+# ── 5. Executive Dashboard (Single-Page Summary) ──────────────────────────────
+
+fig = plt.figure(figsize=(16, 14))
+fig.suptitle('CKD Prediction — Clinical Analytics Dashboard', fontsize=16, y=0.98, fontweight='500')
+gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.5, wspace=0.4)
+
+# ROC curve
+ax_roc = fig.add_subplot(gs[0, 0])
+for name, proba, color in [
+    ('Logistic Regression', lr_proba, '#1D9E75'),
+    ('Random Forest', rf_proba, '#D85A30')
+]:
+    fpr, tpr, _ = roc_curve(y_test, proba)
+    ax_roc.plot(fpr, tpr, label=f'{name[:2]}R (AUC={roc_auc_score(y_test, proba):.2f})', color=color, lw=1.6)
+ax_roc.plot([0,1],[0,1],'k--',lw=0.8,alpha=0.4)
+ax_roc.set_title('ROC curve', fontsize=10)
+ax_roc.set_xlabel('FPR', fontsize=8); ax_roc.set_ylabel('TPR', fontsize=8)
+ax_roc.legend(fontsize=7); ax_roc.grid(alpha=0.2)
+ax_roc.spines[['top','right']].set_visible(False)
+
+# Feature importance
+ax_fi = fig.add_subplot(gs[0, 1:])
+top10 = feature_importance_df.head(10)
+colors = ['#D85A30' if i < 3 else '#9FE1CB' for i in range(len(top10))]
+ax_fi.barh(top10['feature'][::-1], top10['importance'][::-1], color=colors[::-1], edgecolor='white', linewidth=0.3)
+ax_fi.set_title('Top 10 predictive features (Random Forest)', fontsize=10)
+ax_fi.set_xlabel('Importance', fontsize=8)
+ax_fi.spines[['top','right']].set_visible(False)
+ax_fi.grid(axis='x', alpha=0.2)
+ax_fi.tick_params(labelsize=8)
+
+# Recall comparison bar
+ax_rec = fig.add_subplot(gs[1, 0])
+model_names = ['Log. Reg.', 'Rand. Forest']
+recalls = [recall_score(y_test, lr_pred), recall_score(y_test, rf_pred)]
+bars = ax_rec.bar(model_names, recalls, color=['#1D9E75','#D85A30'], edgecolor='white', linewidth=0.4)
+ax_rec.set_ylim(0, 1.1)
+ax_rec.set_title('Recall (sensitivity)', fontsize=10)
+ax_rec.axhline(0.9, color='gray', linestyle='--', linewidth=0.8, alpha=0.6)
+ax_rec.text(1.5, 0.91, 'target ≥ 0.90', fontsize=7.5, color='gray')
+for bar, val in zip(bars, recalls):
+    ax_rec.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{val:.3f}', ha='center', fontsize=9)
+ax_rec.spines[['top','right']].set_visible(False)
+ax_rec.grid(axis='y', alpha=0.2)
+
+# Metrics heatmap
+ax_heat = fig.add_subplot(gs[1, 1])
+heat_data = metrics_df.set_index('Model')[['Accuracy','Precision','Recall','F1 Score','ROC-AUC']]
+sns.heatmap(heat_data, annot=True, fmt='.3f', cmap='YlGn', ax=ax_heat,
+            linewidths=0.5, cbar=False, annot_kws={'size': 9})
+ax_heat.set_title('All metrics comparison', fontsize=10)
+ax_heat.tick_params(labelsize=8)
+
+# Class distribution donut
+ax_donut = fig.add_subplot(gs[1, 2])
+sizes = df['target'].value_counts().values
+wedges, texts, autotexts = ax_donut.pie(
+    sizes, labels=['CKD', 'Not CKD'], colors=['#D85A30','#5DCAA5'],
+    autopct='%1.1f%%', startangle=90, pctdistance=0.75,
+    wedgeprops=dict(width=0.5, edgecolor='white')
+)
+[t.set_fontsize(9) for t in texts + autotexts]
+ax_donut.set_title('Dataset class split', fontsize=10)
+
+# Biomarker distributions
+key_bio = ['serum_creatinine', 'hemoglobin', 'blood_urea']
+for i, col in enumerate(key_bio):
+    ax = fig.add_subplot(gs[2, i])
+    for tval, color, lbl in [(0,'#5DCAA5','Not CKD'),(1,'#D85A30','CKD')]:
+        vals = df[df['target'] == tval][col]
+        ax.hist(vals, bins=20, alpha=0.6, color=color, label=lbl, edgecolor='none')
+    ax.set_title(col.replace('_', ' ').title(), fontsize=9)
+    ax.legend(fontsize=7)
+    ax.spines[['top','right']].set_visible(False)
+    ax.grid(alpha=0.2)
+    ax.tick_params(labelsize=8)
+
+plt.savefig('week4_executive_dashboard.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("Saved: week4_executive_dashboard.png")
+
+# ── 6. Patient Risk Profile Export (for Tableau / Power BI) ──────────────────
+
+risk_df = X_test.copy().reset_index(drop=True)
+risk_df['actual_label'] = y_test.reset_index(drop=True).map({0:'Not CKD', 1:'CKD'})
+risk_df['lr_prediction'] = pd.Series(lr_pred).map({0:'Not CKD', 1:'CKD'})
+risk_df['rf_prediction'] = pd.Series(rf_pred).map({0:'Not CKD', 1:'CKD'})
+risk_df['lr_risk_score'] = lr_proba.round(4)
+risk_df['rf_risk_score'] = rf_proba.round(4)
+risk_df['ensemble_risk_score'] = ((lr_proba + rf_proba) / 2).round(4)
+risk_df['risk_tier'] = pd.cut(
+    risk_df['ensemble_risk_score'],
+    bins=[0, 0.33, 0.66, 1.0],
+    labels=['Low', 'Medium', 'High']
+)
+
+# decode categorical columns back for readability
+cat_map = {
+    'red_blood_cells': {0: 'abnormal', 1: 'normal'},
+    'pus_cell': {0: 'abnormal', 1: 'normal'},
+    'pus_cell_clumps': {0: 'notpresent', 1: 'present'},
+    'bacteria': {0: 'notpresent', 1: 'present'},
+    'hypertension': {0: 'no', 1: 'yes'},
+    'diabetes_mellitus': {0: 'no', 1: 'yes'},
+    'coronary_artery_disease': {0: 'no', 1: 'yes'},
+    'appetite': {0: 'good', 1: 'poor'},
+    'pedal_edema': {0: 'no', 1: 'yes'},
+    'anemia': {0: 'no', 1: 'yes'},
+}
+for col, mapping in cat_map.items():
+    if col in risk_df.columns:
+        risk_df[col] = risk_df[col].map(mapping)
+
+risk_df.to_csv('patient_risk_profiles.csv', index=False)
+print("\nRisk profiles exported: patient_risk_profiles.csv")
+print("Columns:", risk_df.columns.tolist())
+
+print("\nRisk tier distribution:")
+print(risk_df['risk_tier'].value_counts().to_string())
+
+# ── 7. Final Summary ──────────────────────────────────────────────────────────
+
+best_model = metrics_df.loc[metrics_df['Recall'].idxmax(), 'Model']
+best_recall = metrics_df['Recall'].max()
+best_auc = metrics_df.loc[metrics_df['Recall'].idxmax(), 'ROC-AUC']
+
+print(f"\n── Recommended model for deployment: {best_model} ──")
+print(f"   Recall:  {best_recall:.4f}")
+print(f"   ROC-AUC: {best_auc:.4f}")
